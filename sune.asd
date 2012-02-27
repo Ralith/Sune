@@ -4,5 +4,6 @@
   :pathname "src/"
   :components
   ((:file "package")
-   (:file "main")
-   (:file "parse")))
+   (:file "parse")
+   (:file "queue")
+   (:file "main")))
