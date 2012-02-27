@@ -20,12 +20,21 @@
                             :element-type 'ub8))
   (writing nil)
   (write-fill 0)
-  (write-queue (make-queue)))
+  (write-queue (make-queue))
 
+  (handlers (make-hash-table :test 'equal)))
 
 (defmethod print-object ((c connection) stream)
   (print-unreadable-object (c stream :type t :identity t)
-    (princ (connection-socket c) stream)))
+    (format stream "~A (~A handlers)"
+            (connection-socket c)
+            (hash-table-size (connection-handlers c)))))
+
+(defun register-handler (connection command function)
+  (push function (gethash command (connection-handlers connection))))
+
+(defun get-handlers (connection command)
+  (gethash command (connection-handlers connection)))
 
 (defun handle-write (c fd event exception)
   (assert (eq :write event))
@@ -69,7 +78,9 @@
                                       :end pos
                                       :encoding :utf-8
                                       :errorp nil)
-          do (print (parse-message raw))
+          for parsed = (print (parse-message raw))
+          do (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
+                   (get-handlers c (second parsed)))
              (let ((len (+ (length +message-terminator+) pos)))
                (replace readbuf readbuf :start2 len)
                (decf (connection-read-fill c) len)))))
@@ -87,6 +98,8 @@
 
 (defun mainloop (base sock)
   (let ((c (make-connection base sock)))
+    (mapc (lambda (x) (register-handler c (car x) (cdr x))) *default-handlers*)
+
     (enqueue-message c (format nil "USER ~A 0 * :~A" *user* *name*))
     (enqueue-message c (format nil "NICK ~A" *nick*))
 

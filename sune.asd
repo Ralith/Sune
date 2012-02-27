@@ -6,4 +6,5 @@
   ((:file "package")
    (:file "parse")
    (:file "queue")
+   (:file "handlers")
    (:file "main")))
