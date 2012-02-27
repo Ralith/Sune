@@ -18,8 +18,14 @@
   
   (write-buffer (make-array (list +message-max+)
                             :element-type 'ub8))
+  (writing nil)
   (write-fill 0)
   (write-queue (make-queue)))
+
+
+(defmethod print-object ((c connection) stream)
+  (print-unreadable-object (c stream :type t :identity t)
+    (princ (connection-socket c) stream)))
 
 (defun handle-write (c fd event exception)
   (assert (eq :write event))
@@ -42,7 +48,9 @@
         (setf (connection-write-fill c) (+ (length +message-terminator+)
                                            (length message))))
       (actually-write))
-     (t (remove-fd-handlers (connection-base c) fd :write t)))))
+     (t
+      (setf (connection-writing c) nil)
+      (remove-fd-handlers (connection-base c) fd :write t)))))
 
 (defun handle-read (c fd event exception)
   (assert (eq :read event))
@@ -59,28 +67,30 @@
           while pos
           for raw = (octets-to-string readbuf
                                       :end pos
-                                      :encoding :utf-8)
+                                      :encoding :utf-8
+                                      :errorp nil)
           do (print (parse-message raw))
              (let ((len (+ (length +message-terminator+) pos)))
                (replace readbuf readbuf :start2 len)
                (decf (connection-read-fill c) len)))))
 
 ;; TODO: Take a higher-level representation than raw protocol string.
-;; TODO: Install handler if necessary.
-(defun enqueue-message (connection message)
+(defun enqueue-message (c message)
   (let ((encoded (string-to-octets message :encoding :utf-8)))
     (assert (>= (- +message-max+ (length +message-terminator+))
                 (length encoded)))
-    (enqueue encoded
-             (connection-write-queue connection))))
+    (enqueue encoded (connection-write-queue c))
+    (unless (connection-writing c)
+      (setf (connection-writing c) t)
+      (set-io-handler (connection-base c) (socket-os-fd (connection-socket c))
+                      :write (curry 'handle-write c)))))
 
 (defun mainloop (base sock)
   (let ((c (make-connection base sock)))
     (enqueue-message c (format nil "USER ~A 0 * :~A" *user* *name*))
     (enqueue-message c (format nil "NICK ~A" *nick*))
 
-    (set-io-handler base (socket-os-fd sock) :read (curry 'handle-read c))
-    (set-io-handler base (socket-os-fd sock) :write (curry 'handle-write c)))
+    (set-io-handler base (socket-os-fd sock) :read (curry 'handle-read c)))
 
   (event-dispatch base))
 
