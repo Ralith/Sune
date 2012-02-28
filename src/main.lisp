@@ -8,6 +8,7 @@
   (let ((c (make-connection base sock)))
     (mapc (lambda (x) (register-handler c (car x) (cdr x))) *default-handlers*)
     (enqueue-message c (format nil "USER ~A 0 * :~A" *user* *name*))
+    (setf (connection-desired-nick c) *nick*)
     (enqueue-message c (format nil "NICK ~A" *nick*)))
   (event-dispatch base))
 

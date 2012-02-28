@@ -9,6 +9,7 @@
 
 (defhandler autojoin "001" (c server params)
   (declare (ignore server params))
+  (setf (connection-nick c) (connection-desired-nick c))
   (enqueue-message c "JOIN #forble"))
 
 (defhandler ping "PING" (c s params)
