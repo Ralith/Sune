@@ -22,9 +22,7 @@
 
 (defmethod print-object ((c connection) stream)
   (print-unreadable-object (c stream :type t :identity t)
-    (format stream "~A (~A handlers)"
-            (connection-socket c)
-            (hash-table-size (connection-handlers c)))))
+    (format stream "(~A handlers)" (hash-table-count (connection-handlers c)))))
 
 (defun make-connection (base socket)
   (let ((connection (%make-connection base socket)))
