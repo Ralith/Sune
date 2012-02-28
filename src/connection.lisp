@@ -78,8 +78,9 @@
                                       :end pos
                                       :encoding :utf-8
                                       :errorp nil)
-          for parsed = (print (parse-message raw))
-          do (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
+          for parsed = (parse-message raw)
+          do (princ raw) (terpri)
+             (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
                    (get-handlers c (second parsed)))
              (let ((len (+ (length +message-terminator+) pos)))
                (replace readbuf readbuf :start2 len)
@@ -87,6 +88,7 @@
 
 ;; TODO: Take a higher-level representation than raw protocol string.
 (defun enqueue-message (c message)
+  (princ message) (terpri)
   (let ((encoded (string-to-octets message :encoding :utf-8)))
     (assert (>= (- +message-max+ (length +message-terminator+))
                 (length encoded)))
