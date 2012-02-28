@@ -10,7 +10,7 @@
   (prefix
    (colon word space (lambda (a b c)
                        (declare (ignore a c))
-                       b))
+                       (parse-prefix b)))
    ())
 
   (params
@@ -38,6 +38,9 @@
    (trailing colon (lambda (a b)
                      (cons b a)))
    ()))
+
+(defun parse-prefix (string)
+  (split-sequence-if (rcurry 'member '(#\! #\@)) string))
 
 (defun irc-lexer (stream)
   (loop with buf = (make-array '(32) :element-type 'character
