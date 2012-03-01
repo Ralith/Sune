@@ -6,7 +6,11 @@
 
 (defun mainloop (base sock)
   (let ((c (make-connection base sock)))
-    (mapc (lambda (x) (register-handler c (car x) (cdr x))) *default-handlers*)
+    (mapc (lambda (x)
+            (destructuring-bind (name command func make-state) x
+              (declare (ignore name))
+              (register-handler c command (curry func (funcall make-state)))))
+          *default-handlers*)
     (enqueue-message c (format nil "USER ~A 0 * :~A" *user* *name*))
     (setf (connection-desired-nick c) *nick*)
     (enqueue-message c (format nil "NICK ~A" *nick*)))
@@ -18,7 +22,7 @@
     (with-open-socket (sock :connect :active
                             :address-family :internet
                             :type :stream)
-      (handler-case (progn (connect sock (lookup-hostname host)
+      (handler-case (progn (connect sock (ensure-hostname host)
                                     :port port
                                     :wait 5)
                            (format t " success.~%")
