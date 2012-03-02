@@ -7,6 +7,7 @@
   alist)
 
 (defun async-write (base fd data)
+  (check-type data (simple-array ub8 (*)))
   (let ((cursor 0))
    (set-io-handler base fd :write
                    (lambda (fd event exception)
