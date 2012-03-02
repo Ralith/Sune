@@ -8,14 +8,9 @@
 (defstruct (connection (:constructor %make-connection (base socket)))
   base socket nick desired-nick
   
-  (read-buffer (make-array (list +message-max+)
-                           :element-type 'ub8))
-  (read-fill 0)
-  
-  (write-buffer (make-array (list +message-max+)
-                            :element-type 'ub8))
+  (read-buffer (make-buffer +message-max+))
+  (write-buffer (make-buffer +message-max+))
   (writing nil)
-  (write-fill 0)
   (write-queue (make-queue))
 
   (handlers (make-hash-table :test 'equal)))
@@ -36,60 +31,49 @@
 (defun get-handlers (connection command)
   (gethash command (connection-handlers connection)))
 
-(defun handle-write (c fd event exception)
+(defun handle-write (c fd event exception &aux (buffer (connection-write-buffer c)))
   (assert (eq :write event))
   (assert (eq nil exception))
   (flet ((actually-write ()
-           (decf (connection-write-fill c)
-                 (cffi:with-pointer-to-vector-data (ptr (connection-write-buffer c))
-                   (isys:write (socket-os-fd (connection-socket c))
-                               ptr (connection-write-fill c))))))
+           (buffer-write-to buffer fd)))
    (cond
-     ((< 0 (connection-write-fill c))
+     ((< 0 (buffer-fill buffer))
       (actually-write))
      ((not (queue-empty-p (connection-write-queue c)))
       (let ((message (dequeue (connection-write-queue c))))
-        (replace (connection-write-buffer c)
-                 message)
-        (replace (connection-write-buffer c)
-                 +message-terminator+
-                 :start1 (length message))
-        (setf (connection-write-fill c) (+ (length +message-terminator+)
-                                           (length message))))
+        (buffer-read-vec buffer message)
+        (buffer-read-vec buffer +message-terminator+))
       (actually-write))
      (t
       (setf (connection-writing c) nil)
       (remove-fd-handlers (connection-base c) fd :write t)))))
 
-(defun handle-read (c fd event exception)
+(defun handle-read (c fd event exception &aux (buffer (connection-read-buffer c)))
   (assert (eq :read event))
   (assert (eq nil exception))
-  (let ((readbuf (connection-read-buffer c)))
-    (incf (connection-read-fill c)
-         (cffi:with-pointer-to-vector-data (ptr readbuf)
-           (isys:read fd (cffi:make-pointer (+ (cffi:pointer-address ptr)
-                                               (connection-read-fill c)))
-                      (- +message-max+ (connection-read-fill c)))))
-    (loop for pos = (search +message-terminator+
-                            readbuf
-                            :end2 (connection-read-fill c))
-          while pos
-          for raw = (octets-to-string readbuf
-                                      :end pos
-                                      :encoding :utf-8
-                                      :errorp nil)
-          for parsed = (parse-message raw)
-          do (princ raw) (terpri)
-             (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
-                   (get-handlers c (second parsed)))
-             (let ((len (+ (length +message-terminator+) pos)))
-               (replace readbuf readbuf :start2 len)
-               (decf (connection-read-fill c) len)))))
+  (buffer-read-from buffer fd)
+  (loop with data = (buffer-contents buffer)
+        with lastpos = 0
+        for pos = (search +message-terminator+ data :start2 lastpos)
+        while pos
+        for raw = (octets-to-string data
+                                    :start lastpos
+                                    :end pos
+                                    :encoding :utf-8
+                                    :errorp nil)
+        for parsed = (parse-message raw)
+        do (princ raw) (terpri)
+           (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
+                 (get-handlers c (second parsed)))
+           (let ((len (+ (length +message-terminator+) (- pos lastpos))))
+             (buffer-drop buffer len)
+             (incf lastpos len)))
+  (buffer-compact buffer))
 
 ;; TODO: Take a higher-level representation than raw protocol string.
-(defun enqueue-message (c message)
-  (princ message) (terpri)
-  (let ((encoded (string-to-octets message :encoding :utf-8)))
+(defun enqueue-command (c command)
+  (princ command) (terpri)
+  (let ((encoded (string-to-octets command :encoding :utf-8)))
     (assert (>= (- +message-max+ (length +message-terminator+))
                 (length encoded)))
     (enqueue encoded (connection-write-queue c))
@@ -97,3 +81,6 @@
       (setf (connection-writing c) t)
       (set-io-handler (connection-base c) (socket-os-fd (connection-socket c))
                       :write (curry 'handle-write c)))))
+
+(defun enqueue-message (c target message)
+  (enqueue-command c (format nil "PRIVMSG ~A :~A" target message)))
