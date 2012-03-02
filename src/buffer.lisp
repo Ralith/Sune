@@ -31,31 +31,51 @@
   (setf (buffer-read-pos buffer) 0
         (buffer-write-pos buffer) 0))
 
+(define-condition buffer-error (error)
+  ((buffer :initform (error "Must supply buffer")
+           :initarg :buffer :reader buffer-of)))
+
+(define-condition buffer-overflow-error (buffer-error)
+  ()
+  (:report (lambda (condition stream)
+             (format stream "Tried to write more data than ~A has room for"
+                     (buffer-of condition)))))
+
+(define-condition buffer-underflow-error (buffer-error)
+  ()
+  (:report (lambda (condition stream)
+             (format stream "Tried to read more data than ~A contains"
+                     (buffer-of condition)))))
+
 (defun buffer-read-from (buffer fd)
   (let ((remaining (buffer-space-remaining buffer)))
     (unless (> remaining 0)
-      (error "Tried to read into a full buffer."))
+      (error 'buffer-overflow-error :buffer buffer))
     (with-accessors ((wpos buffer-write-pos)) buffer
-      (incf wpos
-            (cffi:with-pointer-to-vector-data (ptr (buffer-array buffer))
-              (isys:read fd (cffi:make-pointer (+ (cffi:pointer-address ptr) wpos))
-                         remaining))))))
+      (let ((bytes (cffi:with-pointer-to-vector-data (ptr (buffer-array buffer))
+                     (isys:read fd (cffi:make-pointer (+ (cffi:pointer-address ptr) wpos))
+                                remaining))))
+        (incf wpos bytes)
+        bytes))))
 
 (defun buffer-read-vec (buffer vec)
+  (unless (> (buffer-space-remaining buffer) (length vec))
+    (error 'buffer-overflow-error :buffer buffer))
   (replace (buffer-array buffer) vec :start1 (buffer-write-pos buffer))
   (incf (buffer-write-pos buffer) (length vec)))
 
 (defun buffer-write-to (buffer fd)
   (let ((waiting (buffer-fill buffer)))
     (unless (> waiting 0)
-      (error "Tried to write from an empty buffer."))
+      (error 'buffer-underflow-error :buffer buffer))
    (with-accessors ((rpos buffer-read-pos)) buffer
-     (incf rpos
-           (cffi:with-pointer-to-vector-data (ptr (buffer-array buffer))
-             (isys:write fd (cffi:make-pointer (+ (cffi:pointer-address ptr) rpos))
-                         waiting))))
-    (when (= 0 (buffer-fill buffer))
-      (buffer-reset buffer))))
+     (let ((bytes (cffi:with-pointer-to-vector-data (ptr (buffer-array buffer))
+                    (isys:write fd (cffi:make-pointer (+ (cffi:pointer-address ptr) rpos))
+                                waiting))))
+       (incf rpos bytes)
+       (when (= 0 (buffer-fill buffer))
+         (buffer-reset buffer))
+       bytes))))
 
 (defun buffer-drop (buffer bytes)
   (assert (<= bytes (buffer-fill buffer)))
