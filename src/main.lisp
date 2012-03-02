@@ -40,5 +40,5 @@
 (defun saveapp (path)
   (ccl:save-application path
                         :toplevel-function #'standalone-main
-                        :error-handler :quit
+                        ;:error-handler :quit
                         :prepend-kernel t))

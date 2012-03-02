@@ -63,7 +63,7 @@
                                     :errorp nil)
         for parsed = (parse-message raw)
         do (princ raw) (terpri)
-           (mapc (rcurry 'funcall c (first parsed) (cddr parsed))
+           (mapc (rcurry 'apply c (first parsed) (cddr parsed))
                  (get-handlers c (second parsed)))
            (let ((len (+ (length +message-terminator+) (- pos lastpos))))
              (buffer-drop buffer len)

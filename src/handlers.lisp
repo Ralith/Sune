@@ -2,31 +2,35 @@
 
 (defvar *default-handlers* '())
 
-(defmacro defhandler (name command (connection source params) state &body body)
+(defmacro defhandler (name command (connection source &rest params) state &body body)
   (with-gensyms (state-var)
     `(setf *default-handlers*
            (alist-set *default-handlers* ',name
                       (list ,command
-                            (lambda (,state-var ,connection ,source ,params)
-                              (declare ,@(unless state `((ignore ,state-var)))
-                                       (ignorable ,connection ,source ,params))
-                              (symbol-macrolet ,(loop for i from 0
-                                                      for name in (mapcar #'first state)
-                                                      collect `(,name (svref ,state-var ,i)))
-                                ,@body))
+                            (symbol-macrolet ,(loop for i from 0
+                                                    for name in (mapcar #'first state)
+                                                    collect `(,name (svref ,state-var ,i)))
+                             (lambda (,state-var ,connection ,source ,@params)
+                               ,@(unless state
+                                   `((declare (ignore ,state-var))))
+                               ,@body))
                             (lambda () ,(when state
                                           `(vector ,@(mapcar #'second state)))))))))
 
-(defhandler autojoin "001" (c server params) ()
+(defhandler autojoin "001" (c server target message) ()
+  (declare (ignore server target message))
   (setf (connection-nick c) (connection-desired-nick c))
   (enqueue-command c (concatenate 'string "JOIN " (connection-autojoin c))))
 
-(defhandler ping "PING" (c s params) ()
-  (enqueue-command c (concatenate 'string "PONG :" (first params))))
+(defhandler ping "PING" (c s arg) ()
+  (declare (ignore s))
+  (enqueue-command c (concatenate 'string "PONG :" arg)))
 
-(defhandler own-nick-track "NICK" (c sender params) ()
+(defhandler own-nick-track "NICK" (c sender newnick) ()
   (when (string= (first sender) (connection-nick c))
-    (setf (connection-nick c) (first params))))
+    (setf (connection-nick c) newnick)))
+
+;(defhandler command-dispatch (c s params))
 
 (defun pm? (connection target)
   (string= target (connection-nick connection)))
@@ -36,23 +40,22 @@
       sender
       target))
 
-(defhandler combo "PRIVMSG" (c sender params)
+(defhandler combo "PRIVMSG" (c sender target message)
             ((state (make-hash-table :test 'equal)))
-  (destructuring-bind (target message) params
-    (let ((reply-to (reply-target c sender target)))
-      (multiple-value-bind (last exists) (gethash reply-to state)
-        (cond
-          ((not exists)
-           (setf last (cons message 0))
-           (setf (gethash reply-to state) last))
-          ((string= (car last) message)
-           (incf (cdr last)))
-          (t
-           (setf (car last) message
-                 (cdr last) 0)))
-        (when (>= (cdr last) 2)
-          (enqueue-message c reply-to message)
-          (setf (car last) nil))))))
+  (let ((reply-to (reply-target c sender target)))
+    (multiple-value-bind (last exists) (gethash reply-to state)
+      (cond
+        ((not exists)
+         (setf last (cons message 0))
+         (setf (gethash reply-to state) last))
+        ((string= (car last) message)
+         (incf (cdr last)))
+        (t
+         (setf (car last) message
+               (cdr last) 0)))
+      (when (>= (cdr last) 2)
+        (enqueue-message c reply-to message)
+        (setf (car last) nil)))))
 
 (defun ensure-scheme (url-string)
   (if (and (> (length url-string ) 7)
@@ -60,15 +63,15 @@
       url-string
       (concatenate 'string "http://" url-string)))
 
-(defhandler urltitle "PRIVMSG" (c sender params)
+(defhandler urltitle "PRIVMSG" (c sender target message)
             ()
-  (destructuring-bind (target message) params
-    (unless (pm? c target)
-      (mapc (curry 'register-uri-titler c target)
-            (mapcar (compose #'parse-uri #'ensure-scheme)
-                    (ppcre:all-matches-as-strings "(?i)(http://|www\\.|youtu\\.)[^\\s]+[^\\.\\)!,\\s]"
-                                                  message
-                                                  :sharedp t))))))
+  (declare (ignore sender))
+  (unless (pm? c target)
+    (mapc (curry 'register-uri-titler c target)
+          (mapcar (compose #'parse-uri #'ensure-scheme)
+                  (ppcre:all-matches-as-strings "(?i)(http://|www\\.|youtu\\.)[^\\s]+[^\\.\\)!,\\s]"
+                                                message
+                                                :sharedp t)))))
 
 (defun handle-url-read (buffer uri sock c reply-to fd event exception)
   (assert (eq :read event))
