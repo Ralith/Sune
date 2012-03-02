@@ -19,7 +19,7 @@
 
 (defhandler autojoin "001" (c server params) ()
   (setf (connection-nick c) (connection-desired-nick c))
-  (enqueue-command c "JOIN #forble"))
+  (enqueue-command c (concatenate 'string "JOIN " (connection-autojoin c))))
 
 (defhandler ping "PING" (c s params) ()
   (enqueue-command c (concatenate 'string "PONG :" (first params))))
@@ -96,7 +96,6 @@
                (enqueue-message c reply-to (trim '(#\Space #\Tab #\Return #\Linefeed)
                                                  (substitute #\Space #\Linefeed title)))))))
       (buffer-overflow-error ()
-        (break)
         (clean-up)
         (enqueue-message c reply-to (format nil "Gave up looking for a title in ~A" uri))))))
 
@@ -141,7 +140,11 @@
 (defun make-http-get (uri)
   (let ((crlf (coerce '(#\Return #\Linefeed) 'string)))
    (concatenate 'string
-                "GET " (or (uri-path uri) "/") " HTTP/1.1" crlf
+                "GET "
+                (or (uri-path uri) "/")
+                (when-let (query (uri-query uri))
+                  (concatenate 'string "?" query))
+                " HTTP/1.1" crlf
                 "Host: " (uri-host uri) crlf
                 "User-Agent: Mozilla/5.0 (X11; Linux i686; rv:10.0.2) Gecko/20100101 Firefox/10.0.2" crlf
                 "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" crlf

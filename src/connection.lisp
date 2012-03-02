@@ -5,8 +5,8 @@
 (defconstant +message-max+ 512)
 (defparameter +message-terminator+ #(#x0D #x0A))
 
-(defstruct (connection (:constructor %make-connection (base socket)))
-  base socket nick desired-nick
+(defstruct (connection (:constructor %make-connection (base socket autojoin)))
+  base socket nick desired-nick autojoin
   
   (read-buffer (make-buffer +message-max+))
   (write-buffer (make-buffer +message-max+))
@@ -19,8 +19,8 @@
   (print-unreadable-object (c stream :type t :identity t)
     (format stream "(~A handlers)" (hash-table-count (connection-handlers c)))))
 
-(defun make-connection (base socket)
-  (let ((connection (%make-connection base socket)))
+(defun make-connection (base socket autojoin)
+  (let ((connection (%make-connection base socket autojoin)))
     (set-io-handler base (socket-os-fd socket) :read
                     (curry 'handle-read connection))
     connection))
